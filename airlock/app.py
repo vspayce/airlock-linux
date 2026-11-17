@@ -1,5 +1,6 @@
 """Airlock for Linux: GTK 4 + libadwaita + WebKitGTK."""
 import html
+import os
 import sys
 from urllib.parse import parse_qs, urlsplit
 
@@ -22,6 +23,36 @@ def page_html(title, body):
 <style>:root{{color-scheme:light dark}} body{{font:16px/1.5 system-ui,sans-serif;max-width:620px;margin:12vh auto;padding:0 20px}}
 h1{{font-size:24px}} a.btn{{display:inline-block;margin-top:12px;padding:8px 14px;border-radius:10px;background:#33a3a3;color:#fff;text-decoration:none}}
 .small{{opacity:.7;font-size:14px}}</style></head><body><h1>{e(title)}</h1>{body}</body></html>"""
+
+
+def start_page(settings, tab):
+    """New-tab page: the logo, the protection status and a search box."""
+    e = html.escape
+    mode = "Strict" if settings["protection"] == "strict" else "Standard"
+    private = tab is not None and tab.private
+    engine_name = urls.SEARCH_ENGINES[settings["engine"]][0]
+    return f"""<!doctype html><html><head><meta charset="utf-8"><title>New tab</title>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src airlock:; style-src 'unsafe-inline'; form-action airlock:">
+<style>
+:root {{ color-scheme: light dark; --teal: #33a3a3; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --teal: #62d6d6; }} body {{ background: #121722; color: #e2e7ee; }} }}
+body {{ font: 16px/1.5 system-ui, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; }}
+main {{ text-align: center; width: min(560px, 90vw); margin-top: -8vh; }}
+img {{ width: 96px; height: 96px; border-radius: 22px; box-shadow: 0 12px 32px #0004; }}
+h1 {{ font-size: 28px; margin: 14px 0 8px; letter-spacing: -0.02em; }}
+.chip {{ display: inline-flex; gap: 6px; align-items: center; padding: 4px 12px; border-radius: 999px;
+  background: color-mix(in srgb, var(--teal) 16%, transparent); color: var(--teal); font-weight: 600; font-size: 14px; }}
+.chip.private {{ background: #8a5cf622; color: #a78bfa; }}
+form {{ margin-top: 24px; }}
+input {{ width: 100%; box-sizing: border-box; font: inherit; padding: 12px 18px; border-radius: 999px;
+  border: 1px solid #8884; background: color-mix(in srgb, currentColor 6%, transparent); color: inherit; outline: none; }}
+input:focus {{ border-color: var(--teal); }}
+</style></head><body><main>
+<img src="airlock://logo.png" alt="">
+<h1>Airlock</h1>
+<span class="chip{' private' if private else ''}">{'Private tab · nothing kept' if private else e('Sealed · ' + mode)}</span>
+<form action="airlock://search" method="get"><input name="q" placeholder="Search {e(engine_name)} or enter address" autocomplete="off"></form>
+</main></body></html>"""
 
 
 class Tab:
@@ -312,9 +343,11 @@ class Window(Adw.ApplicationWindow):
         self.tab_view.set_selected_page(page)
         if url:
             tab.load(url, typed=typed)
-        elif focus:
-            self.entry.set_text("")
-            self.entry.grab_focus()
+        else:
+            tab.open_internal("airlock://start")
+            if focus:
+                self.entry.set_text("")
+                self.entry.grab_focus()
         return tab
 
     def on_close_page(self, view, page):
@@ -346,7 +379,7 @@ class Window(Adw.ApplicationWindow):
         v = tab.view
         uri = v.get_uri() or ""
         if not self.entry.has_focus() or not self.entry.get_text():
-            self.entry.set_text("" if uri.startswith("about:") else uri)
+            self.entry.set_text("" if uri.startswith(("about:", "airlock://start")) else uri)
         p = v.get_estimated_load_progress()
         self.entry.set_progress_fraction(p if v.is_loading() and p < 1 else 0)
         n = len(tab.trackers)
@@ -595,6 +628,19 @@ class Application(Adw.Application):
             self.feed_message = "Refreshing…"
             self.feeds.refresh(lambda: (setattr(self, "feed_message", ""), self.reload_feed_tabs()))
             return self._redirect(request, "airlock://feeds")
+        if route == "start":
+            return self._finish(request, start_page(self.settings, self.window.current))
+        if route == "logo.png":
+            with open(os.path.join(engine.DATA, "logo.png"), "rb") as f:
+                data = GLib.Bytes.new(f.read())
+            request.finish(Gio.MemoryInputStream.new_from_bytes(data), data.get_size(), "image/png")
+            return
+        if route == "search" and q.get("q"):
+            target = urls.url_from_input(q["q"][0], self.settings["engine"])
+            tab = self.window.current
+            if target and tab:
+                GLib.idle_add(lambda: (tab.load(target, typed=True), False)[-1])
+            return self._finish(request, page_html("", ""))
         if route == "feeds":
             msg, self.feed_message = self.feed_message, ""
             return self._finish(request, feeds.render(self.feeds, msg))

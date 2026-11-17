@@ -1,0 +1,23 @@
+{
+ "built": "2026-11-06T06:54Z",
+ "lists": {
+  "easylist": {
+   "blocks": 51697,
+   "cosmeticRules": 5814,
+   "exceptions": 576,
+   "skipped": 1152,
+   "files": [
+    "easylist-1.json"
+   ]
+  },
+  "easyprivacy": {
+   "blocks": 55312,
+   "cosmeticRules": 1,
+   "exceptions": 851,
+   "skipped": 324,
+   "files": [
+    "easyprivacy-1.json"
+   ]
+  }
+ }
+}

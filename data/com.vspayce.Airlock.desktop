@@ -1,0 +1,17 @@
+[Desktop Entry]
+Name=Airlock
+GenericName=Web Browser
+Comment=Private web browsing: ads and trackers blocked, nothing kept that you don't keep
+Exec=airlock %U
+Icon=com.vspayce.Airlock
+Terminal=false
+Type=Application
+Categories=Network;WebBrowser;
+MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;
+StartupNotify=true
+Keywords=web;browser;internet;privacy;
+Actions=new-private-window;
+
+[Desktop Action new-private-window]
+Name=New Private Tab
+Exec=airlock --private

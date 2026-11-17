@@ -1,0 +1,33 @@
+{
+  "id": "com.vspayce.Airlock",
+  "runtime": "org.gnome.Platform",
+  "runtime-version": "49",
+  "sdk": "org.gnome.Sdk",
+  "command": "airlock",
+  "finish-args": [
+    "--share=network",
+    "--share=ipc",
+    "--socket=wayland",
+    "--socket=fallback-x11",
+    "--device=dri",
+    "--socket=pulseaudio",
+    "--filesystem=xdg-download"
+  ],
+  "modules": [
+    {
+      "name": "airlock",
+      "buildsystem": "simple",
+      "build-commands": [
+        "install -d /app/share/airlock",
+        "cp -r airlock /app/share/airlock/",
+        "install -Dm755 airlock.sh /app/bin/airlock",
+        "install -Dm644 data/com.vspayce.Airlock.desktop /app/share/applications/com.vspayce.Airlock.desktop",
+        "install -Dm644 data/com.vspayce.Airlock.png /app/share/icons/hicolor/512x512/apps/com.vspayce.Airlock.png",
+        "install -Dm644 data/com.vspayce.Airlock.metainfo.xml /app/share/metainfo/com.vspayce.Airlock.metainfo.xml"
+      ],
+      "sources": [
+        { "type": "dir", "path": ".", "skip": [".git", ".github", "build-dir", ".flatpak-builder"] }
+      ]
+    }
+  ]
+}

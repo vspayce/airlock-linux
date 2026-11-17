@@ -1,0 +1,38 @@
+name: Linux build
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  selftest:
+    # Runs Airlock's checks in a real WebKitGTK web view on a virtual display.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install GTK 4, libadwaita and WebKitGTK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-webkit-6.0 xvfb dbus-x11
+      - name: Logic checks
+        run: python3 -m airlock.logic_tests
+      - name: Self-test (blocking in a real web view)
+        run: xvfb-run -a dbus-run-session -- python3 -m airlock --selftest
+      - name: Start the app for a few seconds
+        run: |
+          xvfb-run -a dbus-run-session -- timeout 15 python3 -m airlock || code=$?
+          # 124 = still running when the timer stopped it, which is what we want.
+          test "${code:-0}" = "124" || test "${code:-0}" = "0"
+
+  flatpak:
+    runs-on: ubuntu-24.04
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-49
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: airlock.flatpak
+          manifest-path: com.vspayce.Airlock.json
+          cache-key: flatpak-builder-${{ github.sha }}

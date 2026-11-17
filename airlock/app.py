@@ -12,7 +12,7 @@ from gi.repository import Adw, Gio, GLib, Gtk, WebKit  # noqa: E402
 
 from . import engine, feeds, netguard, store, urls  # noqa: E402
 
-APP_ID = "com.vspayce.Airlock"
+APP_ID = "io.github.vspayce.Airlock"
 
 
 def page_html(title, body):
@@ -504,7 +504,7 @@ class Application(Adw.Application):
 
     def show_about(self):
         about = Adw.AboutDialog(application_name="Airlock", application_icon=APP_ID, developer_name="Jason Taylor",
-                                version="0.1", website="https://vspayce.github.io/Airlock/",
+                                version="0.1.0", license_type=Gtk.License.GPL_3_0, website="https://vspayce.github.io/Airlock/",
                                 comments="A privacy browser: trackers and ads blocked, nothing kept that you don't keep.")
         about.present(self.window)
 

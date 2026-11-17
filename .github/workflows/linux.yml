@@ -19,6 +19,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-webkit-6.0 xvfb dbus-x11
+      - name: Check the store listing (AppStream) and desktop file
+        run: |
+          sudo apt-get install -y appstream desktop-file-utils
+          appstreamcli validate --no-net --explain data/io.github.vspayce.Airlock.metainfo.xml
+          desktop-file-validate data/io.github.vspayce.Airlock.desktop
       - name: Logic checks
         run: python3 -m airlock.logic_tests
       - name: Self-test (blocking in a real web view)
@@ -44,8 +49,8 @@ jobs:
       - name: Build the Flatpak
         run: |
           flatpak-builder --user --install-deps-from=flathub --disable-rofiles-fuse --force-clean \
-            --repo=repo build-dir com.vspayce.Airlock.json
-          flatpak build-bundle repo airlock.flatpak com.vspayce.Airlock \
+            --repo=repo build-dir io.github.vspayce.Airlock.json
+          flatpak build-bundle repo airlock.flatpak io.github.vspayce.Airlock \
             --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
           ls -la airlock.flatpak
       - uses: actions/upload-artifact@v4

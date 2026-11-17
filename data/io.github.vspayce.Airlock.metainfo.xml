@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.vspayce.Airlock</id>
+  <name>Airlock</name>
+  <summary>Browse privately with ads and trackers blocked</summary>
+  <developer id="io.github.vspayce">
+    <name>Jason Taylor</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <description>
+    <p>
+      Airlock is a privacy browser. It blocks ads and trackers, keeps every page on a secure connection,
+      and lets you erase everything with one button.
+    </p>
+    <ul>
+      <li>Ad and tracker blocking with EasyList, EasyPrivacy and Airlock's own tracker list</li>
+      <li>Cookie banners hidden, tracking removed from links</li>
+      <li>HTTPS only: plain connections are upgraded, and Airlock asks before loading one that can't be</li>
+      <li>Private tabs that share nothing with each other or with your normal tabs</li>
+      <li>Burn: close every tab and erase cookies, cache and site data in one step</li>
+      <li>Websites can't reach devices on your local network</li>
+      <li>Private search engines to choose from, with the ones that aren't private clearly marked</li>
+      <li>Feeds: follow a site's RSS or Atom feed, or a page with no feed at all</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">io.github.vspayce.Airlock.desktop</launchable>
+  <icon type="stock">io.github.vspayce.Airlock</icon>
+
+  <url type="homepage">https://vspayce.github.io/Airlock/</url>
+  <url type="bugtracker">https://github.com/vspayce/airlock-linux/issues</url>
+  <url type="vcs-browser">https://github.com/vspayce/airlock-linux</url>
+
+  <branding>
+    <color type="primary" scheme_preference="light">#a8e3e3</color>
+    <color type="primary" scheme_preference="dark">#1d4a52</color>
+  </branding>
+
+  <categories>
+    <category>Network</category>
+    <category>WebBrowser</category>
+  </categories>
+  <keywords>
+    <keyword>browser</keyword>
+    <keyword>web</keyword>
+    <keyword>privacy</keyword>
+    <keyword>ad blocker</keyword>
+  </keywords>
+
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+  <requires>
+    <display_length compare="ge">360</display_length>
+  </requires>
+
+  <!-- A browser can show any content on the web; it adds none of its own. -->
+  <content_rating type="oars-1.1"/>
+
+  <!-- TODO before Flathub: add 2-3 screenshots (1280x800 or larger) hosted in this repo, e.g.
+  <screenshots>
+    <screenshot type="default">
+      <caption>A news site with ads blocked</caption>
+      <image>https://raw.githubusercontent.com/vspayce/airlock-linux/main/screenshots/main.png</image>
+    </screenshot>
+  </screenshots>
+  -->
+
+  <releases>
+    <release version="0.1.0" date="2026-11-16">
+      <description>
+        <p>First Linux release: tabs and private tabs, ad and tracker blocking, HTTPS only, Burn, and Feeds.</p>
+      </description>
+    </release>
+  </releases>
+</component>

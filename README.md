@@ -14,14 +14,20 @@ What's in this first version:
 - Burn (Ctrl+Shift+Delete): closes every tab and erases browsing data
 - Feeds: follow a site's RSS/Atom/JSON feed, or a page with no feed (Airlock reads its headlines)
 
-## Install on Pop!_OS (COSMIC)
+## Install
 
-1. Open the latest run under **Actions** → **Linux build** and download **airlock-x86_64** (sign in to GitHub first).
-2. Unzip it and double-click `airlock.flatpak`; the COSMIC Store installs it. Or in a terminal:
-   `flatpak install --user airlock.flatpak`
-3. It needs the GNOME runtime from Flathub; if asked, allow it to download.
+**Download:** https://github.com/vspayce/airlock-linux/releases/latest/download/airlock.flatpak
+
+Double-click the file (the COSMIC Store or GNOME Software opens it), or in a terminal:
+`flatpak install --user airlock.flatpak`. The first install also fetches the GNOME runtime from Flathub.
+Every passing build replaces this download, so the same link always gets the newest one.
 
 Run from source (for development): `sudo apt install python3-gi gir1.2-gtk-4.0 gir1.2-adw-1 gir1.2-webkit-6.0`, then
 `python3 -m airlock`. Checks: `python3 -m airlock --selftest`.
 
 The filter lists in `airlock/data` come from the Apple project's `tools/filters/convert.py` (copied in `tools/`).
+
+## License
+
+GNU General Public License v3.0 or later; see `LICENSE`. The bundled EasyList and EasyPrivacy rules are by
+The EasyList authors; see `THIRD-PARTY-NOTICES.md`. Security problems: see `SECURITY.md`.

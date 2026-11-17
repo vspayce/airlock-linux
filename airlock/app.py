@@ -539,6 +539,11 @@ class Window(Adw.ApplicationWindow):
             box.append(Gtk.Label(label="Open a website to see what Airlock blocks on it.", xalign=0, wrap=True))
             self.shield_popover.set_child(box)
             return
+        info = Gtk.Button(label="Site info: certificate, whois, DNS…")
+        info.add_css_class("pill")
+        info.add_css_class("suggested-action")
+        info.connect("clicked", lambda *_: (self.shield_popover.popdown(), SiteInfo(self, tab).present(self)))
+        box.append(info)
         secure = uri.startswith("https://")
         box.append(Gtk.Label(label="Secure connection (HTTPS)" if secure else "Not secure: plain HTTP", xalign=0))
 
@@ -562,18 +567,16 @@ class Window(Adw.ApplicationWindow):
         head.add_css_class("heading")
         box.append(head)
         if found:
-            lst = Gtk.Label(label="\n".join(found[:30]) + ("\n…" if len(found) > 30 else ""), xalign=0, selectable=True)
+            lst = Gtk.Label(label="\n".join(found), xalign=0, yalign=0, selectable=True)
             lst.add_css_class("dim-label")
-            box.append(lst)
+            scroller = Gtk.ScrolledWindow(child=lst, propagate_natural_height=True, max_content_height=140,
+                                          hscrollbar_policy=Gtk.PolicyType.NEVER)
+            box.append(scroller)
         note = Gtk.Label(label="Ads, cookie banners and EasyPrivacy trackers are blocked too, before they load.",
                          xalign=0, wrap=True, max_width_chars=40)
         note.add_css_class("caption")
         note.add_css_class("dim-label")
         box.append(note)
-        info = Gtk.Button(label="Site info: certificate, whois, DNS…")
-        info.add_css_class("pill")
-        info.connect("clicked", lambda *_: (self.shield_popover.popdown(), SiteInfo(self, tab).present(self)))
-        box.append(info)
         self.shield_popover.set_child(box)
 
     def on_reload(self, *_):

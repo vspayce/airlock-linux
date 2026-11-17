@@ -144,7 +144,6 @@ def web_settings():
     s.set_enable_developer_extras(False)
     s.set_javascript_can_open_windows_automatically(False)
     s.set_enable_back_forward_cache(True)
-    s.set_hardware_acceleration_policy(WebKit.HardwareAccelerationPolicy.ALWAYS)
     return s
 
 

@@ -8,6 +8,11 @@ jobs:
   selftest:
     # Runs Airlock's checks in a real WebKitGTK web view on a virtual display.
     runs-on: ubuntu-24.04
+    env:
+      # GitHub's Ubuntu runners don't allow the user namespaces WebKit's own process sandbox needs
+      # (on a desktop, and inside the Flatpak, the sandbox stays on). GTK_A11Y: no accessibility bus here.
+      WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS: "1"
+      GTK_A11Y: none
     steps:
       - uses: actions/checkout@v4
       - name: Install GTK 4, libadwaita and WebKitGTK

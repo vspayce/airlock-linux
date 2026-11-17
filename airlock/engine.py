@@ -143,7 +143,6 @@ def web_settings():
     s = WebKit.Settings()
     s.set_enable_developer_extras(False)
     s.set_javascript_can_open_windows_automatically(False)
-    s.set_enable_back_forward_cache(True)
     return s
 
 

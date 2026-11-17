@@ -25,8 +25,10 @@ jobs:
         run: xvfb-run -a dbus-run-session -- python3 -m airlock --selftest
       - name: Start the app for a few seconds
         run: |
-          xvfb-run -a dbus-run-session -- timeout 15 python3 -m airlock || code=$?
-          # 124 = still running when the timer stopped it, which is what we want.
+          xvfb-run -a dbus-run-session -- timeout 15 python3 -m airlock > app.log 2>&1 || code=$?
+          cat app.log
+          # 124 = still running when the timer stopped it, which is what we want; any Python error fails the build.
+          ! grep -q "Traceback" app.log
           test "${code:-0}" = "124" || test "${code:-0}" = "0"
 
   flatpak:

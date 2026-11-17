@@ -36,6 +36,9 @@ def run():
     session = WebKit.NetworkSession.new_ephemeral()
     ucm = WebKit.UserContentManager()
     view = WebKit.WebView(network_session=session, user_content_manager=ucm)
+    seen = set()
+    ucm.register_script_message_handler("airlockTrackers", engine.SCANNER_WORLD)
+    ucm.connect("script-message-received::airlockTrackers", lambda _u, v: seen.add(v.to_string()))
     win = Gtk.Window(child=view)
     win.present()
 
@@ -68,6 +71,8 @@ def run():
             results.append(("Ad slots are hidden", out["slot"] == "none", out["slot"]))
             results.append(("Ordinary content stays visible", out["keep"] != "none", out["keep"]))
             results.append(("Pages see Global Privacy Control", out["gpc"] is True, str(out["gpc"])))
+            want = {"google-analytics.com", "script.ac"}
+            results.append(("The shield lists the page's trackers", want <= seen, ", ".join(sorted(seen))))
             loop.quit()
         view.evaluate_javascript(js, -1, None, None, None, done)
         return False

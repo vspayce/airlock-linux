@@ -39,6 +39,10 @@ class Tab:
         self.allow_http = set()      # hosts the user chose to load over plain HTTP, this tab only
         self.upgraded = set()        # addresses Airlock switched to HTTPS (a failure there offers HTTP)
         self.internal_ok = False     # Airlock itself is opening one of its own pages
+        self.trackers = set()        # tracker domains this page referenced (all blocked or cookie-stripped)
+        self.rules_host = None       # the site the current blocking rules were set up for
+        self.ucm.register_script_message_handler("airlockTrackers", engine.SCANNER_WORLD)
+        self.ucm.connect("script-message-received::airlockTrackers", self.on_tracker)
         self.apply_rules()
         v = self.view
         v.connect("decide-policy", self.on_policy)
@@ -49,10 +53,25 @@ class Tab:
         v.connect("notify::uri", lambda *_: win.tab_changed(self))
         v.connect("notify::estimated-load-progress", lambda *_: win.tab_changed(self))
         v.connect("notify::is-loading", lambda *_: win.tab_changed(self))
+        v.connect("load-changed", self.on_load_changed)
 
-    def apply_rules(self):
+    def apply_rules(self, host=None):
         s = self.win.app.settings
-        engine.apply_rules(self.ucm, self.win.app.filters, s)
+        host = host if host is not None else urls.host_of(self.view.get_uri() or "")
+        self.rules_host = host
+        engine.apply_rules(self.ucm, self.win.app.filters, s, shields_off=self.win.app.shields_off(host))
+
+    def on_tracker(self, ucm, value):
+        try:
+            self.trackers.add(value.to_string())
+        except Exception:  # noqa: BLE001
+            return
+        self.win.tab_changed(self)
+
+    def on_load_changed(self, view, event):
+        if event == WebKit.LoadEvent.STARTED:
+            self.trackers.clear()
+            self.win.tab_changed(self)
 
     def load(self, url, typed=False):
         if typed:
@@ -101,6 +120,8 @@ class Tab:
                 self.win.toast("Airlock only opens web addresses")
             return True
         host = (parts.hostname or "").lower()
+        if main_frame and self.win.app.shields_off(host) != self.win.app.shields_off(self.rules_host or ""):
+            self.apply_rules(host)
         # A website can't send you into your local network; you can still type a local address.
         if netguard.is_local_host(host) and host != self.typed:
             decision.ignore()
@@ -163,22 +184,28 @@ class Window(Adw.ApplicationWindow):
         self.tab_view = Adw.TabView()
         self.tab_view.connect("notify::selected-page", lambda *_: self.sync_bar())
         self.tab_view.connect("close-page", self.on_close_page)
-        tab_bar = Adw.TabBar(view=self.tab_view, autohide=False)
+        self.tab_bar = Adw.TabBar(view=self.tab_view, autohide=False, hexpand=True)
 
-        # Header: navigation, address bar, tools. In COSMIC and GNOME this is the title bar itself.
-        header = Adw.HeaderBar()
+        # The controls: navigation, shield, address bar, search engine and tools.
         self.back = self._button("go-previous-symbolic", "Back", lambda *_: self.view and self.view.go_back())
         self.fwd = self._button("go-next-symbolic", "Forward", lambda *_: self.view and self.view.go_forward())
         self.reload = self._button("view-refresh-symbolic", "Reload", self.on_reload)
-        for b in (self.back, self.fwd, self.reload):
-            header.pack_start(b)
+
+        self.shield = Gtk.MenuButton(tooltip_text="Protection for this site")
+        self.shield.add_css_class("flat")
+        self.shield_label = Gtk.Label(label="0")
+        shield_box = Gtk.Box(spacing=4)
+        shield_box.append(Gtk.Image.new_from_icon_name("security-high-symbolic"))
+        shield_box.append(self.shield_label)
+        self.shield.set_child(shield_box)
+        self.shield_popover = Gtk.Popover()
+        self.shield.set_popover(self.shield_popover)
+        self.shield_popover.connect("show", lambda *_: self.fill_shield())
 
         self.entry = Gtk.Entry(hexpand=True, placeholder_text="Search or enter address")
         self.entry.set_input_purpose(Gtk.InputPurpose.URL)
         self.entry.connect("activate", self.on_go)
         self.entry.set_max_width_chars(80)
-        clamp = Adw.Clamp(maximum_size=760, child=self.entry, hexpand=True)
-        header.set_title_widget(clamp)
 
         menu = Gio.Menu()
         menu.append("New Private Tab", "app.private-tab")
@@ -186,24 +213,66 @@ class Window(Adw.ApplicationWindow):
         menu.append("Add Page to Feeds", "win.follow")
         menu.append("Settings", "app.settings")
         menu.append("About Airlock", "app.about")
-        header.pack_end(Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text="Menu"))
-        header.pack_end(self._button("user-trash-full-symbolic", "Burn: close every tab and erase browsing data",
-                                     lambda *_: self.app.burn()))
-        header.pack_end(self._button("tab-new-symbolic", "New tab", lambda *_: self.new_tab(focus=True)))
+        self.menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text="Menu")
+        self.burn_button = self._button("user-trash-full-symbolic", "Burn: close every tab and erase browsing data",
+                                        lambda *_: self.app.burn())
+        self.newtab_button = self._button("tab-new-symbolic", "New tab", lambda *_: self.new_tab(focus=True))
         self.engine_button = Gtk.MenuButton(tooltip_text="Search engine")
-        header.pack_end(self.engine_button)
         self.build_engine_menu()
 
         follow = Gio.SimpleAction.new("follow", None)
         follow.connect("activate", lambda *_: self.follow_current())
         self.add_action(follow)
 
-        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        box.append(header)
-        box.append(tab_bar)
-        box.append(self.tab_view)
-        self.toasts.set_child(box)
-        self.set_content(self.toasts)
+        self.toolbar_view = None
+        self.layout()
+
+    def layout(self):
+        """Address bar at the bottom (like Airlock on iPhone, tabs in the title bar) or at the top (classic)."""
+        bottom = self.app.settings["bar_at_bottom"]
+        if self.toolbar_view:
+            # Take the shared widgets out of the old layout so they can be placed in the new one.
+            old = self.toolbar_view
+            old.set_content(None)
+            self._header.set_title_widget(None)
+            if self.tab_bar.get_parent() is not None and not self._bottom:
+                old.remove(self.tab_bar)
+            for box, widgets in self._boxes:
+                for w in widgets:
+                    box.remove(w)
+            self._clamp.set_child(None)
+        tv = Adw.ToolbarView()
+        header = Adw.HeaderBar()
+        controls = Gtk.Box(spacing=6, hexpand=True)
+        for w in (self.back, self.fwd, self.reload):
+            controls.append(w)
+        middle = Gtk.Box(spacing=2, hexpand=True)
+        middle.append(self.shield)
+        middle.append(self.entry)
+        clamp = Adw.Clamp(maximum_size=820, child=middle, hexpand=True)
+        controls.append(clamp)
+        for w in (self.engine_button, self.newtab_button, self.burn_button, self.menu_button):
+            controls.append(w)
+        if bottom:
+            # Title bar: the tabs (COSMIC and GNOME draw the window buttons around them).
+            header.set_title_widget(self.tab_bar)
+            tv.add_top_bar(header)
+            bar = Gtk.Box(css_classes=["toolbar"])
+            bar.append(controls)
+            tv.add_bottom_bar(bar)
+            tv.set_bottom_bar_style(Adw.ToolbarStyle.RAISED)
+        else:
+            header.set_title_widget(controls)
+            tv.add_top_bar(header)
+            tv.add_top_bar(self.tab_bar)
+        tv.set_content(self.tab_view)
+        self._header, self._clamp, self._bottom = header, clamp, bottom
+        self._boxes = [(controls, [self.back, self.fwd, self.reload, clamp, self.engine_button, self.newtab_button,
+                                   self.burn_button, self.menu_button]), (middle, [self.shield, self.entry])]
+        self.toolbar_view = tv
+        self.toasts.set_child(tv)
+        if self.get_content() is not self.toasts:
+            self.set_content(self.toasts)
 
     def _button(self, icon, tip, cb):
         b = Gtk.Button(icon_name=icon, tooltip_text=tip)
@@ -280,9 +349,67 @@ class Window(Adw.ApplicationWindow):
             self.entry.set_text("" if uri.startswith("about:") else uri)
         p = v.get_estimated_load_progress()
         self.entry.set_progress_fraction(p if v.is_loading() and p < 1 else 0)
+        n = len(tab.trackers)
+        self.shield_label.set_label(str(n))
+        off = self.app.shields_off(urls.host_of(uri))
+        self.shield.set_tooltip_text("Shields are off for this site" if off else
+                                     f"{n} tracker{'s' if n != 1 else ''} blocked on this page")
+        if off:
+            self.shield.add_css_class("warning")
+        else:
+            self.shield.remove_css_class("warning")
         self.back.set_sensitive(v.can_go_back())
         self.fwd.set_sensitive(v.can_go_forward())
         self.reload.set_icon_name("process-stop-symbolic" if v.is_loading() else "view-refresh-symbolic")
+
+    def fill_shield(self):
+        """The shield's popover: what was blocked here, and switches for this site."""
+        tab = self.current
+        s = self.app.settings
+        uri = tab.view.get_uri() if tab else ""
+        host = urls.host_of(uri or "")
+        site = urls.site_key(host)
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin_top=12, margin_bottom=12,
+                      margin_start=12, margin_end=12, width_request=300)
+        title = Gtk.Label(label=site or "This page", xalign=0)
+        title.add_css_class("title-3")
+        box.append(title)
+        if not uri.startswith(("http://", "https://")):
+            box.append(Gtk.Label(label="Open a website to see what Airlock blocks on it.", xalign=0, wrap=True))
+            self.shield_popover.set_child(box)
+            return
+        secure = uri.startswith("https://")
+        box.append(Gtk.Label(label="Secure connection (HTTPS)" if secure else "Not secure: plain HTTP", xalign=0))
+
+        on = Adw.SwitchRow(title="Shields", subtitle="Ad and tracker blocking on this site", active=not self.app.shields_off(host))
+        on.connect("notify::active", lambda r, _: self.app.set_shields(host, r.get_active()))
+        mode = Adw.ComboRow(title="Protection", model=Gtk.StringList.new(["Standard", "Strict"]),
+                            selected=1 if s["protection"] == "strict" else 0)
+        mode.connect("notify::selected", lambda r, _: s.__setitem__("protection", "strict" if r.get_selected() else "standard"))
+        ads = Adw.SwitchRow(title="Block ads", active=s["block_ads"])
+        ads.connect("notify::active", lambda r, _: s.__setitem__("block_ads", r.get_active()))
+        rows = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+        rows.add_css_class("boxed-list")
+        for row in (on, mode, ads):
+            rows.append(row)
+        box.append(rows)
+
+        found = sorted(tab.trackers)
+        head = Gtk.Label(xalign=0, label=f"{len(found)} tracker{'s' if len(found) != 1 else ''} on this page"
+                         + ("" if self.app.shields_off(host) else
+                            (" (blocked)" if s["protection"] == "strict" else " (cookies blocked)")))
+        head.add_css_class("heading")
+        box.append(head)
+        if found:
+            lst = Gtk.Label(label="\n".join(found[:30]) + ("\n…" if len(found) > 30 else ""), xalign=0, selectable=True)
+            lst.add_css_class("dim-label")
+            box.append(lst)
+        note = Gtk.Label(label="Ads, cookie banners and EasyPrivacy trackers are blocked too, before they load.",
+                         xalign=0, wrap=True, max_width_chars=40)
+        note.add_css_class("caption")
+        note.add_css_class("dim-label")
+        box.append(note)
+        self.shield_popover.set_child(box)
 
     def on_reload(self, *_):
         v = self.view
@@ -375,9 +502,29 @@ class Application(Adw.Application):
     def on_setting_changed(self, key):
         if key == "engine" and self.window:
             self.window.build_engine_menu()
+        if key == "bar_at_bottom" and self.window:
+            self.window.layout()
         if key in ("protection", "block_ads", "easyprivacy", "hide_cookie_banners", "gpc") and self.window:
             for tab in self.window.tabs.values():
                 tab.apply_rules()
+
+    def shields_off(self, host):
+        site = urls.site_key(host or "")
+        return bool(site) and site in self.settings["shields_off"]
+
+    def set_shields(self, host, on):
+        site = urls.site_key(host or "")
+        if not site:
+            return
+        sites = [x for x in self.settings["shields_off"] if x != site]
+        if not on:
+            sites.append(site)
+        self.settings["shields_off"] = sorted(sites)
+        for tab in self.window.tabs.values():
+            tab.apply_rules()
+            if urls.site_key(urls.host_of(tab.view.get_uri() or "")) == site:
+                tab.view.reload()
+        self.window.sync_bar()
 
     def on_engine(self, action, value):
         self.settings["engine"] = value.get_string()
@@ -499,6 +646,13 @@ class Application(Adw.Application):
             row.connect("notify::active", lambda r, _, k=key: s.__setitem__(k, r.get_active()))
             prot.add(row)
         page.add(prot)
+
+        look = Adw.PreferencesGroup(title="Layout")
+        bottom = Adw.SwitchRow(title="Address bar at the bottom", subtitle="Tabs move up into the title bar",
+                               active=s["bar_at_bottom"])
+        bottom.connect("notify::active", lambda r, _: s.__setitem__("bar_at_bottom", r.get_active()))
+        look.add(bottom)
+        page.add(look)
         dlg.add(page)
         dlg.present(self.window)
 

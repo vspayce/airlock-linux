@@ -36,6 +36,8 @@ DEFAULTS = {
     "https_only": True,
     "gpc": True,
     "clear_on_quit": False,
+    "bar_at_bottom": True,
+    "shields_off": [],             # sites where Airlock's blocking is off
 }
 
 

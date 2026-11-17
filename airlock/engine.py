@@ -146,9 +146,55 @@ def web_settings():
     return s
 
 
+SCANNER_WORLD = "airlock"
+
+
+def scanner_script():
+    """Reports which tracker domains a page references (runs in a world the page can't see)."""
+    domains = json.load(open(os.path.join(DATA, "airlock-lists.json")))["domains"]
+    return """
+(function () {
+  const list = %s;
+  const found = new Set();
+  function check(u) {
+    try {
+      const h = new URL(u, location.href).hostname;
+      if (!h || h === location.hostname) return;
+      for (const d of list) {
+        if (h === d || h.endsWith('.' + d)) {
+          if (!found.has(d)) { found.add(d); window.webkit.messageHandlers.airlockTrackers.postMessage(d); }
+          return;
+        }
+      }
+    } catch (e) {}
+  }
+  function scan(root) {
+    if (!root.querySelectorAll) return;
+    root.querySelectorAll('script[src],img[src],iframe[src],link[href]').forEach(function (el) { check(el.src || el.href); });
+  }
+  function start() {
+    scan(document);
+    try { performance.getEntriesByType('resource').forEach(function (e) { check(e.name); }); } catch (e) {}
+    new MutationObserver(function (ms) {
+      ms.forEach(function (m) { m.addedNodes.forEach(function (n) { if (n.nodeType === 1) { check(n.src || n.href || ''); scan(n); } }); });
+    }).observe(document.documentElement, { childList: true, subtree: true });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start); else start();
+})();
+""" % json.dumps(domains)
+
+
+_SCANNER = None
+
+
 def apply_rules(ucm, filters, settings, shields_off=False):
+    global _SCANNER
     ucm.remove_all_filters()
     ucm.remove_all_scripts()
+    if _SCANNER is None:
+        _SCANNER = scanner_script()
+    ucm.add_script(WebKit.UserScript.new_for_world(_SCANNER, WebKit.UserContentInjectedFrames.TOP_FRAME,
+                                                   WebKit.UserScriptInjectionTime.START, SCANNER_WORLD, None, None))
     if settings["gpc"]:
         ucm.add_script(WebKit.UserScript.new(GPC_SCRIPT, WebKit.UserContentInjectedFrames.ALL_FRAMES,
                                              WebKit.UserScriptInjectionTime.START, None, None))

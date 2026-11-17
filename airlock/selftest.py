@@ -28,6 +28,11 @@ def run():
     for name, ok, detail in logic_tests.run_all():
         results.append((name, ok, detail))
 
+    good = ["div.ad > span", "#sidebar", "p:nth-of-type(2)", "aside.promo.box"]
+    bad = ["a{} body{background:red}", "x;y", "a</style><script>", "@import url(x)", "a /* c */", "a[x='1']"]
+    results.append(("Saved hidden-item selectors can't inject CSS",
+                    all(engine.safe_selector(x) for x in good) and not any(engine.safe_selector(x) for x in bad), ""))
+
     Gtk.init()
     settings = store.Settings()
     loop = GLib.MainLoop()

@@ -42,7 +42,18 @@ DEFAULTS = {
     "clip_folder": "",
     "clip_subfolder": "Clippings",
     "clip_tags": "",
+    "generic_ua": False,
+    "favorites": [],               # [{"title": ..., "url": ...}] on the new-tab page
+    "kept_tabs": [],               # addresses of Keep tabs: reopened at launch, kept through Burn
+    "hidden": {},                  # site -> CSS selectors of items you hid with the picker
 }
+
+HARDENED = {"protection": "strict", "block_ads": True, "easyprivacy": True, "hide_cookie_banners": True,
+            "strip_tracking": True, "https_only": True, "gpc": True, "clear_on_quit": True, "generic_ua": True}
+
+
+def is_hardened(settings):
+    return all(settings[k] == v for k, v in HARDENED.items())
 
 
 class Settings:

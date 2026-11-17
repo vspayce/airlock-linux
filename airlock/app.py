@@ -26,33 +26,72 @@ h1{{font-size:24px}} a.btn{{display:inline-block;margin-top:12px;padding:8px 14p
 .small{{opacity:.7;font-size:14px}}</style></head><body><h1>{e(title)}</h1>{body}</body></html>"""
 
 
+def _tile_color(text):
+    palette = ["#2f7f86", "#5b6fd6", "#c2683a", "#3f8f55", "#9b59b6", "#b94a6a", "#8a7a2f", "#3a76b8"]
+    return palette[sum(map(ord, text)) % len(palette)]
+
+
 def start_page(settings, tab):
-    """New-tab page: the logo, the protection status and a search box."""
+    """New-tab page: the logo, the protection mode button, favorites and a search box."""
     e = html.escape
-    mode = "Strict" if settings["protection"] == "strict" else "Standard"
     private = tab is not None and tab.private
     engine_name = urls.SEARCH_ENGINES[settings["engine"]][0]
+    if store.is_hardened(settings):
+        status = "Fully Sealed"
+    else:
+        status = "Sealed · " + ("Strict" if settings["protection"] == "strict" else "Standard")
+    current = "hardened" if store.is_hardened(settings) else settings["protection"]
+    modes = "".join(
+        f'<a class="mode{" on" if key == current else ""}" href="airlock://mode?m={key}"><b>{name}</b><span>{desc}</span></a>'
+        for key, name, desc in (("standard", "Standard", "Trackers can't follow you; most sites just work"),
+                                ("strict", "Strict", "Trackers blocked outright; a few sites may break"),
+                                ("hardened", "Hardened", "Strict, plus everything erased on quit and a common user agent")))
+    tiles = "".join(
+        f'<div class="tile"><a href="{e(f["url"])}"><span class="ic" style="background:{_tile_color(urls.site_key(urls.host_of(f["url"])))}">'
+        f'{e((urls.site_key(urls.host_of(f["url"])) or "?")[:1].upper())}</span><span class="t">{e(f["title"][:24])}</span></a>'
+        f'<a class="x" title="Remove" href="airlock://favorites/remove?url={e(GLib.Uri.escape_string(f["url"], None, False))}">×</a></div>'
+        for f in settings["favorites"][:24] if urls.host_of(f.get("url", "")))
+    if not tiles:
+        tiles = '<p class="hint">Add sites here with <b>Add to Favorites</b> in the menu (Ctrl+D).</p>'
+    chip = ('<span class="chip private">Private tab · nothing kept</span>' if private else
+            f'<details><summary class="chip">{e(status)} ▾</summary><div class="menu">{modes}</div></details>')
     return f"""<!doctype html><html><head><meta charset="utf-8"><title>New tab</title>
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src airlock:; style-src 'unsafe-inline'; form-action airlock:">
 <style>
-:root {{ color-scheme: light dark; --teal: #33a3a3; }}
-@media (prefers-color-scheme: dark) {{ :root {{ --teal: #62d6d6; }} body {{ background: #121722; color: #e2e7ee; }} }}
+:root {{ color-scheme: light dark; --teal: #2a8f8f; --card: #0000000a; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --teal: #62d6d6; --card: #ffffff0d; }} body {{ background: #121722; color: #e2e7ee; }} }}
 body {{ font: 16px/1.5 system-ui, sans-serif; margin: 0; min-height: 100vh; display: grid; place-items: center; }}
-main {{ text-align: center; width: min(560px, 90vw); margin-top: -8vh; }}
-img {{ width: 96px; height: 96px; border-radius: 22px; box-shadow: 0 12px 32px #0004; }}
-h1 {{ font-size: 28px; margin: 14px 0 8px; letter-spacing: -0.02em; }}
+main {{ text-align: center; width: min(640px, 92vw); padding: 6vh 0; }}
+img.logo {{ width: 88px; height: 88px; border-radius: 20px; box-shadow: 0 12px 32px #0004; }}
+h1 {{ font-size: 28px; margin: 12px 0 8px; letter-spacing: -0.02em; }}
+details {{ display: inline-block; position: relative; }}
+summary {{ list-style: none; cursor: pointer; }} summary::-webkit-details-marker {{ display: none; }}
 .chip {{ display: inline-flex; gap: 6px; align-items: center; padding: 4px 12px; border-radius: 999px;
   background: color-mix(in srgb, var(--teal) 16%, transparent); color: var(--teal); font-weight: 600; font-size: 14px; }}
 .chip.private {{ background: #8a5cf622; color: #a78bfa; }}
-form {{ margin-top: 24px; }}
+.menu {{ position: absolute; left: 50%; transform: translateX(-50%); top: 34px; z-index: 2; width: 300px; text-align: left;
+  background: Canvas; border: 1px solid #8884; border-radius: 16px; padding: 6px; box-shadow: 0 12px 32px #0005; }}
+.mode {{ display: block; padding: 8px 12px; border-radius: 12px; color: inherit; text-decoration: none; }}
+.mode:hover {{ background: var(--card); }} .mode.on {{ background: color-mix(in srgb, var(--teal) 16%, transparent); }}
+.mode b {{ display: block; }} .mode span {{ font-size: 13px; opacity: .7; }}
+form {{ margin: 24px 0 28px; }}
 input {{ width: 100%; box-sizing: border-box; font: inherit; padding: 12px 18px; border-radius: 999px;
-  border: 1px solid #8884; background: color-mix(in srgb, currentColor 6%, transparent); color: inherit; outline: none; }}
+  border: 1px solid #8884; background: var(--card); color: inherit; outline: none; }}
 input:focus {{ border-color: var(--teal); }}
+.grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 14px; }}
+.tile {{ position: relative; }} .tile a {{ color: inherit; text-decoration: none; }}
+.ic {{ display: grid; place-items: center; width: 60px; height: 60px; margin: 0 auto 6px; border-radius: 16px;
+  color: #fff; font-size: 26px; font-weight: 700; }}
+.t {{ display: block; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+.x {{ position: absolute; top: -6px; right: 6px; display: none; width: 20px; height: 20px; line-height: 18px;
+  border-radius: 50%; background: #8886; color: #fff !important; font-size: 14px; }}
+.tile:hover .x {{ display: block; }} .hint {{ opacity: .6; font-size: 14px; }}
 </style></head><body><main>
-<img src="airlock://logo.png" alt="">
+<img class="logo" src="airlock://logo.png" alt="">
 <h1>Airlock</h1>
-<span class="chip{' private' if private else ''}">{'Private tab · nothing kept' if private else e('Sealed · ' + mode)}</span>
-<form action="airlock://search" method="get"><input name="q" placeholder="Search {e(engine_name)} or enter address" autocomplete="off"></form>
+{chip}
+<form action="airlock://search" method="get"><input name="q" placeholder="Search {e(engine_name)} or enter address" autocomplete="off" autofocus></form>
+<div class="grid">{tiles}</div>
 </main></body></html>"""
 
 
@@ -65,7 +104,7 @@ class Tab:
         self.session = win.app.sessions.private() if private else win.app.sessions.normal
         self.ucm = WebKit.UserContentManager()
         self.view = WebKit.WebView(network_session=self.session, user_content_manager=self.ucm,
-                                   settings=engine.web_settings())
+                                   settings=engine.web_settings(win.app.settings))
         self.view.set_vexpand(True)
         self.typed = None            # the host the user typed or picked (may be on the local network)
         self.allow_http = set()      # hosts the user chose to load over plain HTTP, this tab only
@@ -75,6 +114,8 @@ class Tab:
         self.rules_host = None       # the site the current blocking rules were set up for
         self.ucm.register_script_message_handler("airlockTrackers", engine.SCANNER_WORLD)
         self.ucm.connect("script-message-received::airlockTrackers", self.on_tracker)
+        self.ucm.register_script_message_handler("airlockPick", engine.SCANNER_WORLD)
+        self.ucm.connect("script-message-received::airlockPick", self.on_pick)
         self.apply_rules()
         v = self.view
         v.connect("decide-policy", self.on_policy)
@@ -91,7 +132,8 @@ class Tab:
         s = self.win.app.settings
         host = host if host is not None else urls.host_of(self.view.get_uri() or "")
         self.rules_host = host
-        engine.apply_rules(self.ucm, self.win.app.filters, s, shields_off=self.win.app.shields_off(host))
+        engine.apply_rules(self.ucm, self.win.app.filters, s, shields_off=self.win.app.shields_off(host),
+                           hidden=s["hidden"].get(urls.site_key(host), []))
 
     def on_tracker(self, ucm, value):
         try:
@@ -99,6 +141,21 @@ class Tab:
         except Exception:  # noqa: BLE001
             return
         self.win.tab_changed(self)
+
+    def pick(self):
+        self.view.evaluate_javascript(engine.PICKER_SCRIPT, -1, engine.SCANNER_WORLD, None, None, None)
+        self.win.toast("Click the item to hide. Esc cancels.")
+
+    def on_pick(self, ucm, value):
+        sel = engine.safe_selector(value.to_string())
+        site = urls.site_key(urls.host_of(self.view.get_uri() or ""))
+        if not sel or not site:
+            return
+        s = self.win.app.settings
+        hidden = dict(s["hidden"])
+        hidden[site] = (hidden.get(site, []) + [sel])[-200:]
+        s["hidden"] = hidden
+        self.win.toast(f"Hidden on {site}. Show it again from the menu.")
 
     def on_load_changed(self, view, event):
         if event == WebKit.LoadEvent.STARTED:
@@ -464,6 +521,10 @@ class Window(Adw.ApplicationWindow):
         menu.append("New Private Tab", "app.private-tab")
         menu.append("Feeds", "app.feeds")
         menu.append("Add Page to Feeds", "win.follow")
+        menu.append("Add to Favorites", "app.favorite")
+        menu.append("Keep This Tab", "app.keep")
+        menu.append("Hide Distracting Item…", "app.pick")
+        menu.append("Show Hidden Items on This Site", "app.unhide")
         menu.append("Reader View", "app.reader")
         menu.append("Clip Page…", "app.clip")
         menu.append("Settings", "app.settings")
@@ -584,9 +645,23 @@ class Window(Adw.ApplicationWindow):
             self.new_tab(focus=True)
         return True
 
-    def close_all(self):
+    def close_all(self, keep=False):
         for page in list(self.tabs):
+            if keep and page.get_pinned():
+                continue
             self.tab_view.close_page(page)
+
+    def toggle_keep(self):
+        page = self.tab_view.get_selected_page()
+        if not page:
+            return
+        tab = self.tabs.get(page)
+        if tab and tab.private:
+            self.toast("Private tabs can't be kept")
+            return
+        self.tab_view.set_page_pinned(page, not page.get_pinned())
+        self.toast("Kept: this tab stays through Burn and reopens next time" if page.get_pinned() else "No longer kept")
+        self.app.save_kept()
 
     def tab_changed(self, tab):
         for page, t in self.tabs.items():
@@ -738,6 +813,10 @@ class Application(Adw.Application):
         act("feeds", lambda *_: self.open_feeds())
         act("reader", lambda *_: self.toggle_reader())
         act("clip", lambda *_: self.clip_page())
+        act("favorite", lambda *_: self.add_favorite())
+        act("keep", lambda *_: self.window.toggle_keep())
+        act("pick", lambda *_: self.window.current and self.window.current.pick())
+        act("unhide", lambda *_: self.unhide())
         act("settings", lambda *_: self.show_settings())
         act("about", lambda *_: self.show_about())
         act("engine", self.on_engine, GLib.VariantType.new("s"))
@@ -745,13 +824,18 @@ class Application(Adw.Application):
                              "app.close-tab": ["<Control>w"], "app.focus-address": ["<Control>l", "F6"],
                              "app.reload": ["<Control>r", "F5"], "app.back": ["<Alt>Left"],
                              "app.forward": ["<Alt>Right"], "app.burn": ["<Control><Shift>Delete"],
-                             "app.reader": ["<Control><Alt>r"], "app.clip": ["<Control><Shift>s"]}.items():
+                             "app.reader": ["<Control><Alt>r"], "app.clip": ["<Control><Shift>s"],
+                             "app.favorite": ["<Control>d"]}.items():
             self.set_accels_for_action(action, keys)
         self.settings.on_change(self.on_setting_changed)
 
     def do_activate(self):
         if not self.window:
             self.window = Window(self)
+            for url in self.settings["kept_tabs"]:
+                if urlsplit(url).scheme in ("http", "https"):
+                    t = self.window.new_tab(url=url)
+                    self.window.tab_view.set_page_pinned(self.window.tab_view.get_selected_page(), True)
             self.window.new_tab(private=self.start_private, focus=True)
         self.window.present()
 
@@ -773,9 +857,12 @@ class Application(Adw.Application):
             self.window.build_engine_menu()
         if key == "bar_at_bottom" and self.window:
             self.window.layout()
-        if key in ("protection", "block_ads", "easyprivacy", "hide_cookie_banners", "gpc") and self.window:
+        if key in ("protection", "block_ads", "easyprivacy", "hide_cookie_banners", "gpc", "hidden") and self.window:
             for tab in self.window.tabs.values():
                 tab.apply_rules()
+        if key == "generic_ua" and self.window:
+            for tab in self.window.tabs.values():
+                engine.apply_user_agent(tab.view.get_settings(), self.settings)
 
     def shields_off(self, host):
         site = urls.site_key(host or "")
@@ -797,6 +884,31 @@ class Application(Adw.Application):
 
     def on_engine(self, action, value):
         self.settings["engine"] = value.get_string()
+
+    def unhide(self):
+        tab = self.window.current
+        site = urls.site_key(urls.host_of(tab.view.get_uri() or "")) if tab else ""
+        if site and site in self.settings["hidden"]:
+            hidden = dict(self.settings["hidden"])
+            hidden.pop(site)
+            self.settings["hidden"] = hidden
+            tab.view.reload()
+            self.window.toast(f"Everything on {site} is showing again")
+        else:
+            self.window.toast("Nothing is hidden on this site")
+
+    def add_favorite(self):
+        tab = self.window.current
+        uri = tab.view.get_uri() if tab else ""
+        if not uri.startswith(("https://", "http://")):
+            self.window.toast("Open a website first")
+            return
+        if any(f.get("url") == uri for f in self.settings["favorites"]):
+            self.window.toast("Already in Favorites")
+            return
+        title = (tab.view.get_title() or urls.site_key(urls.host_of(uri)))[:60]
+        self.settings["favorites"] = self.settings["favorites"] + [{"title": title, "url": uri}]
+        self.window.toast(f"Added to Favorites: {title}")
 
     # Reader view and clipping
 
@@ -860,7 +972,7 @@ class Application(Adw.Application):
 
     def burn(self, then=None):
         w = self.window
-        w.close_all()
+        w.close_all(keep=True)
 
         def done():
             w.toast("Burned: tabs closed and browsing data erased")
@@ -868,7 +980,18 @@ class Application(Adw.Application):
                 then()
         self.sessions.clear_normal(done)
 
+    def save_kept(self):
+        if not self.window:
+            return
+        kept = []
+        for page, tab in self.window.tabs.items():
+            uri = tab.view.get_uri() or ""
+            if page.get_pinned() and uri.startswith(("http://", "https://")):
+                kept.append(uri)
+        self.settings["kept_tabs"] = kept
+
     def on_shutdown(self, *_):
+        self.save_kept()
         if self.settings["clear_on_quit"]:
             loop = GLib.MainLoop()
             self.sessions.clear_normal(loop.quit)
@@ -926,6 +1049,20 @@ class Application(Adw.Application):
             article = self.articles.get(q["id"][0])
             if article:
                 return self._finish(request, clip.reader_page(article))
+        if route == "mode" and q.get("m"):
+            m = q["m"][0]
+            if m == "hardened":
+                for k, v in store.HARDENED.items():
+                    self.settings[k] = v
+            elif m in ("standard", "strict"):
+                if store.is_hardened(self.settings):
+                    self.settings["clear_on_quit"] = False
+                    self.settings["generic_ua"] = False
+                self.settings["protection"] = m
+            return self._redirect(request, "airlock://start")
+        if route == "favorites/remove" and q.get("url"):
+            self.settings["favorites"] = [f for f in self.settings["favorites"] if f.get("url") != q["url"][0]]
+            return self._redirect(request, "airlock://start")
         if route == "start":
             return self._finish(request, start_page(self.settings, self.window.current))
         if route == "logo.png":
@@ -985,7 +1122,8 @@ class Application(Adw.Application):
         for key, title in (("block_ads", "Block ads (EasyList)"), ("easyprivacy", "Extra tracker list (EasyPrivacy)"),
                            ("hide_cookie_banners", "Hide cookie banners"), ("strip_tracking", "Remove tracking from links"),
                            ("https_only", "HTTPS only"), ("gpc", "Ask sites not to sell or share my data (GPC)"),
-                           ("clear_on_quit", "Erase browsing data when Airlock quits")):
+                           ("clear_on_quit", "Erase browsing data when Airlock quits"),
+                           ("generic_ua", "Common user agent (look like Safari on a Mac)")):
             row = Adw.SwitchRow(title=title, active=s[key])
             row.connect("notify::active", lambda r, _, k=key: s.__setitem__(k, r.get_active()))
             prot.add(row)

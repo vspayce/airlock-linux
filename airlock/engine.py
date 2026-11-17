@@ -139,11 +139,24 @@ class Sessions:
         self.normal.get_website_data_manager().clear(WebKit.WebsiteDataTypes.ALL, 0, None, finished)
 
 
-def web_settings():
+# The most common WebKit user agent (Safari on a Mac), so Airlock on Linux blends in with far more people.
+GENERIC_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) "
+              "Version/18.0 Safari/605.1.15")
+
+
+def web_settings(settings=None):
     s = WebKit.Settings()
     s.set_enable_developer_extras(False)
     s.set_javascript_can_open_windows_automatically(False)
+    apply_user_agent(s, settings)
     return s
+
+
+def apply_user_agent(web, settings):
+    if settings is not None and settings["generic_ua"]:
+        web.set_user_agent(GENERIC_UA)
+    else:
+        web.set_user_agent(None)   # WebKitGTK's own (Safari on Linux)
 
 
 SCANNER_WORLD = "airlock"
@@ -187,7 +200,59 @@ def scanner_script():
 _SCANNER = None
 
 
-def apply_rules(ucm, filters, settings, shields_off=False):
+PICKER_SCRIPT = r"""
+(function () {
+  if (window.__airlockPicker) return;
+  window.__airlockPicker = true;
+  var box = document.createElement('div');
+  box.style.cssText = 'position:fixed;pointer-events:none;z-index:2147483647;border:2px solid #33c3c3;' +
+    'background:rgba(51,195,195,.15);border-radius:4px;transition:all .05s';
+  document.documentElement.appendChild(box);
+  var ok = /^[A-Za-z][\w-]*$/;
+  function selector(el) {
+    var parts = [];
+    while (el && el.nodeType === 1 && el !== document.body && el !== document.documentElement && parts.length < 5) {
+      if (el.id && ok.test(el.id)) { parts.unshift('#' + el.id); break; }
+      var p = el.tagName.toLowerCase();
+      var cls = Array.prototype.filter.call(el.classList, function (c) { return ok.test(c); }).slice(0, 2);
+      if (cls.length) p += '.' + cls.join('.');
+      else { var i = 1, s = el; while ((s = s.previousElementSibling)) if (s.tagName === el.tagName) i++; p += ':nth-of-type(' + i + ')'; }
+      parts.unshift(p);
+      el = el.parentElement;
+    }
+    return parts.join(' > ');
+  }
+  function move(e) {
+    var r = e.target.getBoundingClientRect();
+    box.style.top = r.top + 'px'; box.style.left = r.left + 'px';
+    box.style.width = r.width + 'px'; box.style.height = r.height + 'px';
+  }
+  function click(e) {
+    e.preventDefault(); e.stopPropagation();
+    var s = selector(e.target);
+    e.target.style.setProperty('display', 'none', 'important');
+    done();
+    window.webkit.messageHandlers.airlockPick.postMessage(s);
+  }
+  function key(e) { if (e.key === 'Escape') { e.preventDefault(); done(); } }
+  function done() {
+    removeEventListener('mousemove', move, true); removeEventListener('click', click, true);
+    removeEventListener('keydown', key, true); box.remove(); window.__airlockPicker = false;
+  }
+  addEventListener('mousemove', move, true); addEventListener('click', click, true); addEventListener('keydown', key, true);
+})();
+"""
+
+
+def safe_selector(sel):
+    """Saved selectors only ever hide things: nothing that could end the rule and add CSS of its own."""
+    sel = (sel or "").strip()
+    if not sel or len(sel) > 300 or any(c in sel for c in "{}<>;@\\\n\r\"'") or "/*" in sel:
+        return None
+    return sel
+
+
+def apply_rules(ucm, filters, settings, shields_off=False, hidden=()):
     global _SCANNER
     ucm.remove_all_filters()
     ucm.remove_all_scripts()
@@ -198,6 +263,12 @@ def apply_rules(ucm, filters, settings, shields_off=False):
     if settings["gpc"]:
         ucm.add_script(WebKit.UserScript.new(GPC_SCRIPT, WebKit.UserContentInjectedFrames.ALL_FRAMES,
                                              WebKit.UserScriptInjectionTime.START, None, None))
+    ucm.remove_all_style_sheets()
+    safe = [x for x in (safe_selector(h) for h in hidden) if x]
+    if safe:
+        css = "\n".join(f"{x} {{ display: none !important; }}" for x in safe)
+        ucm.add_style_sheet(WebKit.UserStyleSheet.new(css, WebKit.UserContentInjectedFrames.TOP_FRAME,
+                                                      WebKit.UserStyleLevel.USER, None, None))
     if shields_off:
         return
     for f in filters.active(settings):

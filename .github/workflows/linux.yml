@@ -32,18 +32,27 @@ jobs:
           test "${code:-0}" = "124" || test "${code:-0}" = "0"
 
   flatpak:
+    # Plain flatpak-builder on the runner (the prebuilt container's runtime updates kept failing).
     runs-on: ubuntu-24.04
-    container:
-      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-49
-      options: --privileged
     steps:
       - uses: actions/checkout@v4
-      - uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+      - name: Install flatpak-builder
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+      - name: Build the Flatpak
+        run: |
+          flatpak-builder --user --install-deps-from=flathub --disable-rofiles-fuse --force-clean \
+            --repo=repo build-dir com.vspayce.Airlock.json
+          flatpak build-bundle repo airlock.flatpak com.vspayce.Airlock \
+            --runtime-repo=https://dl.flathub.org/repo/flathub.flatpakrepo
+          ls -la airlock.flatpak
+      - uses: actions/upload-artifact@v4
         with:
-          bundle: airlock.flatpak
-          manifest-path: com.vspayce.Airlock.json
-          # The restored builder cache breaks runtime updates in this container ("Invalid cross-device link").
-          cache: false
+          name: airlock-x86_64.flatpak
+          path: airlock.flatpak
+          if-no-files-found: error
 
   release:
     # Puts the newest build on the Releases page, so it downloads from one fixed link:

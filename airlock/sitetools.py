@@ -7,8 +7,8 @@ from urllib.parse import quote
 from . import feeds
 
 
-def _json(url):
-    data, _ = feeds.fetch(url)
+def _json(url, accept="application/json"):
+    data, _ = feeds.fetch(url, accept=accept)
     return json.loads(data[:1_000_000])
 
 
@@ -35,7 +35,7 @@ def whois(host):
     while len(labels) >= 2:
         name = ".".join(labels)
         try:
-            o = _json("https://rdap.org/domain/" + quote(name))
+            o = _json("https://rdap.org/domain/" + quote(name), "application/rdap+json")
         except Exception:  # noqa: BLE001 - not registered at this level; try the parent
             labels = labels[1:]
             continue
@@ -63,11 +63,12 @@ TYPES = [("A", 1), ("AAAA", 28), ("CNAME", 5), ("MX", 15), ("NS", 2), ("TXT", 16
 
 
 def dns(host):
-    out, ok = [], False
+    out, ok, last_error = [], False, None
     for name, code in TYPES:
         try:
-            o = _json(f"https://cloudflare-dns.com/dns-query?name={quote(host)}&type={name}&ct=application/dns-json")
-        except Exception:  # noqa: BLE001
+            o = _json(f"https://cloudflare-dns.com/dns-query?name={quote(host)}&type={name}", "application/dns-json")
+        except Exception as e:  # noqa: BLE001
+            last_error = e
             continue
         ok = True
         for a in o.get("Answer", []):
@@ -76,13 +77,13 @@ def dns(host):
                 if (name, v) not in out:
                     out.append((name, v))
     if not ok:
-        raise LookupError("DNS lookup failed")
+        raise LookupError(f"DNS lookup failed: {last_error}")
     return out
 
 
 def ip_owner(ip):
     try:
-        o = _json("https://rdap.org/ip/" + quote(ip))
+        o = _json("https://rdap.org/ip/" + quote(ip), "application/rdap+json")
     except Exception:  # noqa: BLE001
         return None
     owner = None

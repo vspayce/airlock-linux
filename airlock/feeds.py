@@ -35,14 +35,14 @@ class _NoRedirectIntoNetwork(urllib.request.HTTPRedirectHandler):
 _opener = urllib.request.build_opener(_NoRedirectIntoNetwork())
 
 
-def fetch(url):
+def fetch(url, accept=None):
     url = urls.upgrade_to_https(url)
     p = urlsplit(url)
     if p.scheme != "https" or not netguard.resolves_public(p.hostname or ""):
         raise FeedError("Airlock only fetches feeds over HTTPS from public websites.")
     req = urllib.request.Request(url, headers={
         "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
-        "Accept": "application/rss+xml, application/atom+xml, application/feed+json, text/html;q=0.8, */*;q=0.5",
+        "Accept": accept or "application/rss+xml, application/atom+xml, application/feed+json, text/html;q=0.8, */*;q=0.5",
     })
     with _opener.open(req, timeout=20) as r:
         data = r.read(MAX_BYTES + 1)

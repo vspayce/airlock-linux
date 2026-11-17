@@ -247,7 +247,7 @@ PICKER_SCRIPT = r"""
 def safe_selector(sel):
     """Saved selectors only ever hide things: nothing that could end the rule and add CSS of its own."""
     sel = (sel or "").strip()
-    if not sel or len(sel) > 300 or any(c in sel for c in "{}<>;@\\\n\r\"'") or "/*" in sel:
+    if not sel or len(sel) > 300 or any(c in sel for c in "{}<;@\\\n\r\"'") or "/*" in sel:
         return None
     return sel
 

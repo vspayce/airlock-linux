@@ -44,3 +44,29 @@ jobs:
           manifest-path: com.vspayce.Airlock.json
           # The restored builder cache breaks runtime updates in this container ("Invalid cross-device link").
           cache: false
+
+  release:
+    # Puts the newest build on the Releases page, so it downloads from one fixed link:
+    # https://github.com/vspayce/airlock-linux/releases/latest/download/airlock.flatpak
+    needs: [selftest, flatpak]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: airlock-x86_64.flatpak
+          path: out
+      - name: Publish to the Releases page
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -la out
+          f=$(find out -name '*.flatpak' | head -1)
+          cp "$f" airlock.flatpak
+          tag="build-${{ github.run_number }}"
+          gh release create "$tag" airlock.flatpak --target "${{ github.sha }}" --latest \
+            --title "Airlock for Linux (build ${{ github.run_number }})" \
+            --notes "Download airlock.flatpak, then double-click it (or run: flatpak install --user airlock.flatpak)."

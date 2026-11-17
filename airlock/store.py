@@ -38,6 +38,10 @@ DEFAULTS = {
     "clear_on_quit": False,
     "bar_at_bottom": True,
     "shields_off": [],             # sites where Airlock's blocking is off
+    "clip_destination": "folder",
+    "clip_folder": "",
+    "clip_subfolder": "Clippings",
+    "clip_tags": "",
 }
 
 

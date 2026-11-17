@@ -11,7 +11,7 @@ gi.require_version("Gtk", "4.0")
 gi.require_version("WebKit", "6.0")
 from gi.repository import GLib, Gtk, WebKit  # noqa: E402
 
-from . import engine, logic_tests, store  # noqa: E402
+from . import clip, engine, logic_tests, store  # noqa: E402
 
 PAGE = """<!doctype html><html><body>
 <script>window.r={};function m(k,v){window.r[k]=v}</script>
@@ -73,8 +73,26 @@ def run():
             results.append(("Pages see Global Privacy Control", out["gpc"] is True, str(out["gpc"])))
             want = {"google-analytics.com", "script.ac"}
             results.append(("The shield lists the page's trackers", want <= seen, ", ".join(sorted(seen))))
-            loop.quit()
+            para = "<p>" + " ".join(["The council met on Tuesday to discuss the new park and its trees."] * 6) + "</p>"
+            article = ("<!doctype html><html><head><title>Park news | Daily</title></head><body><nav><a href='/'>Home</a></nav>"
+                       "<article><h1>City approves new park</h1>" + para * 6 + "</article><footer>Footer</footer></body></html>")
+            view.load_html(article, "https://news.example/park")
+            GLib.timeout_add_seconds(3, check_reader)
         view.evaluate_javascript(js, -1, None, None, None, done)
+        return False
+
+    def check_reader():
+        def done(v, res):
+            try:
+                out = json.loads(v.evaluate_javascript_finish(res).to_string())
+            except Exception as e:  # noqa: BLE001
+                out = {"ok": False, "error": str(e)}
+            ok = out.get("ok") and "park" in (out.get("title") or "").lower() and "council met" in out.get("content", "") \
+                and "Footer" not in out.get("content", "")
+            results.append(("Reader view finds the article (Readability)", ok,
+                            (out.get("title") or out.get("error") or "")[:80]))
+            loop.quit()
+        view.evaluate_javascript(clip.extract_script(), -1, engine.SCANNER_WORLD, None, None, done)
         return False
 
     GLib.timeout_add(250, wait_lists)

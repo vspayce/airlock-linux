@@ -1,5 +1,6 @@
 """Airlock for Linux: GTK 4 + libadwaita + WebKitGTK."""
 import html
+import json
 import os
 import sys
 from urllib.parse import parse_qs, urlsplit
@@ -11,7 +12,7 @@ gi.require_version("Adw", "1")
 gi.require_version("WebKit", "6.0")
 from gi.repository import Adw, Gio, GLib, Gtk, WebKit  # noqa: E402
 
-from . import engine, feeds, netguard, store, urls  # noqa: E402
+from . import clip, engine, feeds, netguard, store, urls  # noqa: E402
 
 APP_ID = "io.github.vspayce.Airlock"
 
@@ -332,6 +333,96 @@ class SiteInfo(Adw.Dialog):
         return False
 
 
+class ClipDialog(Adw.Dialog):
+    """Clip the article as Markdown: into your Obsidian vault (or any notes folder), a file, or the clipboard."""
+
+    def __init__(self, app, article):
+        super().__init__(title="Clip", content_width=460)
+        self.app, self.article = app, article
+        s = app.settings
+        page = Adw.PreferencesPage()
+        tv = Adw.ToolbarView(content=page)
+        header = Adw.HeaderBar()
+        self.go = Gtk.Button(label="Clip")
+        self.go.add_css_class("suggested-action")
+        self.go.connect("clicked", self.on_clip)
+        header.pack_end(self.go)
+        tv.add_top_bar(header)
+        self.set_child(tv)
+
+        what = Adw.PreferencesGroup(title=GLib.markup_escape_text(urls.host_of(article.get("url", ""))))
+        self.title_row = Adw.EntryRow(title="Title", text=article.get("title") or "")
+        self.tags_row = Adw.EntryRow(title="Tags (comma separated)", text=s["clip_tags"])
+        what.add(self.title_row)
+        what.add(self.tags_row)
+        page.add(what)
+
+        where = Adw.PreferencesGroup(title="Clip to")
+        self.dest = Adw.ComboRow(title="Destination", model=Gtk.StringList.new(
+            ["Obsidian vault / notes folder", "Markdown file…", "Copy as Markdown"]))
+        self.dest.set_selected({"folder": 0, "file": 1, "copy": 2}.get(s["clip_destination"], 0))
+        where.add(self.dest)
+        self.folder_row = Adw.ActionRow(title="Folder", subtitle=GLib.markup_escape_text(s["clip_folder"] or "Not chosen yet"))
+        pick = Gtk.Button(label="Choose…", valign=Gtk.Align.CENTER)
+        pick.connect("clicked", self.on_pick)
+        self.folder_row.add_suffix(pick)
+        where.add(self.folder_row)
+        sub = Adw.EntryRow(title="Subfolder", text=s["clip_subfolder"])
+        sub.connect("changed", lambda r: s.__setitem__("clip_subfolder", r.get_text().strip().strip("/")))
+        where.add(sub)
+        page.add(where)
+        page.add(Adw.PreferencesGroup(description="Clips are Markdown with the title, source and tags at the top. "
+                                                  "Pick your Obsidian vault as the folder and they appear there."))
+
+    def on_pick(self, *_):
+        dialog = Gtk.FileDialog(title="Choose your Obsidian vault or notes folder", modal=True)
+
+        def picked(d, res):
+            try:
+                f = d.select_folder_finish(res)
+            except GLib.Error:
+                return
+            if f and f.get_path():
+                self.app.settings["clip_folder"] = f.get_path()
+                self.folder_row.set_subtitle(GLib.markup_escape_text(f.get_path()))
+        dialog.select_folder(self.app.window, None, picked)
+
+    def on_clip(self, *_):
+        s = self.app.settings
+        tags = [t for t in self.tags_row.get_text().split(",") if t.strip()]
+        s["clip_tags"] = self.tags_row.get_text().strip()
+        title = self.title_row.get_text().strip() or None
+        choice = ["folder", "file", "copy"][self.dest.get_selected()]
+        s["clip_destination"] = choice
+        if choice == "copy":
+            self.app.window.get_clipboard().set(clip.note(self.article, tags, title))
+            self.app.window.toast("Copied as Markdown")
+            self.close()
+        elif choice == "folder":
+            if not s["clip_folder"]:
+                self.on_pick()
+                return
+            try:
+                path = clip.save_to_folder(s["clip_folder"], self.article, tags, title, s["clip_subfolder"])
+                self.app.window.toast("Clipped to " + os.path.basename(os.path.dirname(path)))
+                self.close()
+            except Exception as e:  # noqa: BLE001
+                self.app.window.toast(f"Couldn't save the clip: {e}")
+        else:
+            dialog = Gtk.FileDialog(title="Save clip", modal=True, initial_name=clip.file_name(title or self.article.get("title")))
+
+            def saved(d, res):
+                try:
+                    f = d.save_finish(res)
+                except GLib.Error:
+                    return
+                f.replace_contents(clip.note(self.article, tags, title).encode("utf-8"), None, False,
+                                   Gio.FileCreateFlags.REPLACE_DESTINATION, None)
+                self.app.window.toast("Clip saved")
+                self.close()
+            dialog.save(self.app.window, None, saved)
+
+
 class Window(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Airlock")
@@ -359,6 +450,9 @@ class Window(Adw.ApplicationWindow):
         self.shield.set_child(shield_box)
         self.shield_popover = Gtk.Popover()
         self.shield.set_popover(self.shield_popover)
+        self.reader_button = self._button("format-justify-left-symbolic", "Reader view (Ctrl+Alt+R)",
+                                          lambda *_: self.app.toggle_reader())
+        self.reader_button.add_css_class("flat")
         self.shield_popover.connect("show", lambda *_: self.fill_shield())
 
         self.entry = Gtk.Entry(hexpand=True, placeholder_text="Search or enter address")
@@ -370,6 +464,8 @@ class Window(Adw.ApplicationWindow):
         menu.append("New Private Tab", "app.private-tab")
         menu.append("Feeds", "app.feeds")
         menu.append("Add Page to Feeds", "win.follow")
+        menu.append("Reader View", "app.reader")
+        menu.append("Clip Page…", "app.clip")
         menu.append("Settings", "app.settings")
         menu.append("About Airlock", "app.about")
         self.menu_button = Gtk.MenuButton(icon_name="open-menu-symbolic", menu_model=menu, tooltip_text="Menu")
@@ -407,6 +503,7 @@ class Window(Adw.ApplicationWindow):
             controls.append(w)
         middle = Gtk.Box(spacing=2, hexpand=True)
         middle.append(self.shield)
+        middle.append(self.reader_button)
         middle.append(self.entry)
         clamp = Adw.Clamp(maximum_size=820, child=middle, hexpand=True)
         controls.append(clamp)
@@ -427,7 +524,7 @@ class Window(Adw.ApplicationWindow):
         tv.set_content(self.tab_view)
         self._header, self._clamp, self._bottom = header, clamp, bottom
         self._boxes = [(controls, [self.back, self.fwd, self.reload, clamp, self.engine_button, self.newtab_button,
-                                   self.burn_button, self.menu_button]), (middle, [self.shield, self.entry])]
+                                   self.burn_button, self.menu_button]), (middle, [self.shield, self.reader_button, self.entry])]
         self.toolbar_view = tv
         self.toasts.set_child(tv)
         if self.get_content() is not self.toasts:
@@ -613,6 +710,7 @@ class Application(Adw.Application):
         self.feed_message = ""
         self.ready_lists = set()
         self.start_private = False
+        self.articles = {}           # Reader view articles by id (kept in memory only)
         self.connect("shutdown", self.on_shutdown)
 
     def do_startup(self):
@@ -638,13 +736,16 @@ class Application(Adw.Application):
         act("forward", lambda *_: self.window.view and self.window.view.go_forward())
         act("burn", lambda *_: self.burn())
         act("feeds", lambda *_: self.open_feeds())
+        act("reader", lambda *_: self.toggle_reader())
+        act("clip", lambda *_: self.clip_page())
         act("settings", lambda *_: self.show_settings())
         act("about", lambda *_: self.show_about())
         act("engine", self.on_engine, GLib.VariantType.new("s"))
         for action, keys in {"app.new-tab": ["<Control>t"], "app.private-tab": ["<Control><Shift>n"],
                              "app.close-tab": ["<Control>w"], "app.focus-address": ["<Control>l", "F6"],
                              "app.reload": ["<Control>r", "F5"], "app.back": ["<Alt>Left"],
-                             "app.forward": ["<Alt>Right"], "app.burn": ["<Control><Shift>Delete"]}.items():
+                             "app.forward": ["<Alt>Right"], "app.burn": ["<Control><Shift>Delete"],
+                             "app.reader": ["<Control><Alt>r"], "app.clip": ["<Control><Shift>s"]}.items():
             self.set_accels_for_action(action, keys)
         self.settings.on_change(self.on_setting_changed)
 
@@ -696,6 +797,64 @@ class Application(Adw.Application):
 
     def on_engine(self, action, value):
         self.settings["engine"] = value.get_string()
+
+    # Reader view and clipping
+
+    def extract(self, tab, done):
+        """Finds the article on the tab's page (Readability, in Airlock's private script world)."""
+        if not hasattr(self, "_extract_js"):
+            self._extract_js = clip.extract_script()
+        uri = tab.view.get_uri() or ""
+        if not uri.startswith(("http://", "https://")):
+            done(None, "Open an article first")
+            return
+
+        def finished(view, res):
+            try:
+                out = json.loads(view.evaluate_javascript_finish(res).to_string())
+            except Exception as e:  # noqa: BLE001
+                done(None, str(e))
+                return
+            if not out.get("ok"):
+                done(None, "Airlock couldn't find an article on this page")
+                return
+            done(out, None)
+        tab.view.evaluate_javascript(self._extract_js, -1, engine.SCANNER_WORLD, None, None, finished)
+
+    def toggle_reader(self):
+        tab = self.window.current
+        if not tab:
+            return
+        if (tab.view.get_uri() or "").startswith("airlock://reader"):
+            tab.view.go_back()
+            return
+
+        def show(article, error):
+            if error:
+                self.window.toast(error)
+                return
+            key = str(len(self.articles) + 1)
+            self.articles[key] = article
+            tab.open_internal("airlock://reader?id=" + key)
+        self.extract(tab, show)
+
+    def clip_page(self):
+        tab = self.window.current
+        if not tab:
+            return
+        uri = tab.view.get_uri() or ""
+        if uri.startswith("airlock://reader"):
+            key = parse_qs(urlsplit(uri).query).get("id", [""])[0]
+            if key in self.articles:
+                ClipDialog(self, self.articles[key]).present(self.window)
+                return
+
+        def show(article, error):
+            if error:
+                self.window.toast(error)
+                return
+            ClipDialog(self, article).present(self.window)
+        self.extract(tab, show)
 
     # Burn
 
@@ -763,6 +922,10 @@ class Application(Adw.Application):
             self.feed_message = "Refreshing…"
             self.feeds.refresh(lambda: (setattr(self, "feed_message", ""), self.reload_feed_tabs()))
             return self._redirect(request, "airlock://feeds")
+        if route == "reader" and q.get("id"):
+            article = self.articles.get(q["id"][0])
+            if article:
+                return self._finish(request, clip.reader_page(article))
         if route == "start":
             return self._finish(request, start_page(self.settings, self.window.current))
         if route == "logo.png":

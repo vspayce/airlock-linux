@@ -24,3 +24,9 @@ Airlock and covered by its license.
 | GLib / GObject / GIO | LGPL-2.1-or-later |
 | PyGObject | LGPL-2.1-or-later |
 | Python | PSF License |
+
+## Readability (bundled)
+
+`airlock/data/Readability.js` is Mozilla's Readability library (https://github.com/mozilla/readability,
+commit ab4027a8), Copyright (c) 2010 Arc90 Inc and Mozilla, licensed under the Apache License 2.0.
+It finds the article on a page for Reader view and clipping. Apache-2.0 code may be combined with GPL-3.0 code.

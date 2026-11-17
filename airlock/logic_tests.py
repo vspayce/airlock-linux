@@ -1,5 +1,9 @@
 """Checks that need no window: address handling, local-network guard, feeds and page watching."""
-from . import feeds, netguard, urls
+import json
+import os
+import tempfile
+
+from . import clip, feeds, netguard, urls
 
 
 def _expect(name, ok, detail=""):
@@ -62,6 +66,32 @@ def run_all():
                                            "read": set()})())
     out.append(_expect("Feeds page escapes everything from feeds",
                        "<script>alert" not in html_out and "<b>x</b>" not in html_out and '"onmouseover' not in html_out))
+    # Clipping
+    art = {"title": 'He said "hi"\n---\nevil: true', "url": "https://example.com/a/b",
+           "content": '<p>Hello <b>bold</b> <a href="/x">link</a> <a href="javascript:alert(1)">bad</a></p>'
+                      '<script>alert(1)</script><blockquote><p>Q</p></blockquote><img src="/i.png" onerror="x()">'}
+    n = clip.note(art, ["news", "a b!"])
+    front = n.split("---\n")[1]
+    out.append(_expect("Clip front matter can't be broken out of",
+                       front.count("\n") == 4 and json.loads(front.splitlines()[0][7:]) == art["title"], front))
+    md = n.split("---\n", 2)[2]
+    out.append(_expect("Clips become clean Markdown",
+                       "**bold**" in md and "[link](https://example.com/x)" in md and "javascript" not in md
+                       and "alert" not in md and "> Q" in md and "![](https://example.com/i.png)" in md, md))
+    page = clip.reader_page(art)
+    out.append(_expect("Reader page has no scripts or handlers",
+                       "<script" not in page and "onerror" not in page and "javascript:" not in page))
+    with tempfile.TemporaryDirectory() as d:
+        p1 = clip.save_to_folder(d, art, subfolder="Clippings")
+        p2 = clip.save_to_folder(d, art, subfolder="Clippings")
+        bad = None
+        try:
+            clip.save_to_folder(d, art, subfolder="../../etc")
+        except ValueError:
+            bad = "refused"
+        out.append(_expect("Clips stay in their folder and never overwrite",
+                           p1 != p2 and os.path.dirname(p1) == os.path.join(d, "Clippings") and bad == "refused",
+                           f"{p1} {p2} {bad}"))
     return out
 
 

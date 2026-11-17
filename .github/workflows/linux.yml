@@ -42,4 +42,5 @@ jobs:
         with:
           bundle: airlock.flatpak
           manifest-path: com.vspayce.Airlock.json
-          cache-key: flatpak-builder-${{ github.sha }}
+          # The restored builder cache breaks runtime updates in this container ("Invalid cross-device link").
+          cache: false

@@ -60,12 +60,15 @@ def run_all():
                        title == "Example Daily" and titles == ["City council approves new park", "School board meets Tuesday",
                                                                "Rain expected this weekend"] and items[0]["date"],
                        f"{title} {titles}"))
-    html_out = feeds.render(type("S", (), {"feeds": [{"id": "f", "title": "<b>x</b>", "url": "https://e.com"}],
-                                           "items": [{"id": "i", "feed": "f", "title": "<script>alert(1)</script>",
-                                                      "link": "https://e.com/\"onmouseover=x", "date": 0, "summary": ""}],
-                                           "read": set()})())
+    fake = feeds.FeedStore.__new__(feeds.FeedStore)
+    fake.feeds = [{"id": "f", "title": "<b>x</b>", "url": "https://e.com", "folder": "<i>f</i>"}]
+    fake.items = [{"id": "i", "feed": "f", "title": "<script>alert(1)</script>", "link": "https://e.com/\"onmouseover=x",
+                   "date": 0, "summary": "", "image": "https://e.com/x.png\"onerror=y"}]
+    fake.read, fake.later = set(), set()
+    html_out = feeds.render(fake, scope="all")
     out.append(_expect("Feeds page escapes everything from feeds",
-                       "<script>alert" not in html_out and "<b>x</b>" not in html_out and '"onmouseover' not in html_out))
+                       "<script>alert" not in html_out and "<b>x</b>" not in html_out and '"onmouseover' not in html_out
+                       and '"onerror' not in html_out and "<i>f</i>" not in html_out))
     # Clipping
     art = {"title": 'He said "hi"\n---\nevil: true', "url": "https://example.com/a/b",
            "content": '<p>Hello <b>bold</b> <a href="/x">link</a> <a href="javascript:alert(1)">bad</a></p>'

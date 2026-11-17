@@ -1007,10 +1007,42 @@ class Application(Adw.Application):
         if self.feeds.feeds:
             self.feeds.refresh(lambda: self.reload_feed_tabs())
 
+    def import_opml(self):
+        dialog = Gtk.FileDialog(title="Import feeds (OPML)", modal=True)
+
+        def picked(d, res):
+            try:
+                f = d.open_finish(res)
+                ok, data, _ = f.load_contents(None)
+                entries = feeds.FeedStore.parse_opml(bytes(data)[:5_000_000])
+            except Exception as e:  # noqa: BLE001
+                self.window.toast(f"Couldn't read that file: {e}")
+                return
+            self.window.toast(f"Importing {len(entries)} feeds…")
+            import threading
+
+            def work():
+                added = 0
+                for url, folder in entries:
+                    try:
+                        self.feeds.follow(url)
+                        if folder:
+                            for fd in self.feeds.feeds:
+                                if fd["url"].rstrip("/").lower() in (url.rstrip("/").lower(), urls.upgrade_to_https(url).rstrip("/").lower()):
+                                    fd["folder"] = folder
+                        added += 1
+                    except Exception:  # noqa: BLE001
+                        pass
+                self.feeds.save()
+                GLib.idle_add(lambda: (self.window.toast(f"Imported {added} of {len(entries)} feeds"),
+                                       self.reload_feed_tabs(), False)[-1])
+            threading.Thread(target=work, daemon=True).start()
+        dialog.open(self.window, None, picked)
+
     def reload_feed_tabs(self):
         for tab in self.window.tabs.values():
             if (tab.view.get_uri() or "").startswith("airlock://feeds"):
-                tab.open_internal("airlock://feeds")
+                tab.open_internal("airlock://feeds?scope=" + GLib.Uri.escape_string(getattr(self, "feed_scope", "today"), None, False))
 
     def follow(self, url, report):
         import threading
@@ -1044,7 +1076,7 @@ class Application(Adw.Application):
         if route == "feeds/refresh":
             self.feed_message = "Refreshing…"
             self.feeds.refresh(lambda: (setattr(self, "feed_message", ""), self.reload_feed_tabs()))
-            return self._redirect(request, "airlock://feeds")
+            return self._redirect(request, "airlock://feeds?scope=" + GLib.Uri.escape_string(q.get("scope", ["today"])[0], None, False))
         if route == "reader" and q.get("id"):
             article = self.articles.get(q["id"][0])
             if article:
@@ -1078,7 +1110,41 @@ class Application(Adw.Application):
             return self._finish(request, page_html("", ""))
         if route == "feeds":
             msg, self.feed_message = self.feed_message, ""
-            return self._finish(request, feeds.render(self.feeds, msg))
+            self.feed_scope = q.get("scope", [getattr(self, "feed_scope", "today")])[0]
+            return self._finish(request, feeds.render(self.feeds, msg, self.feed_scope))
+        back = "airlock://feeds?scope=" + GLib.Uri.escape_string(q.get("scope", [getattr(self, "feed_scope", "today")])[0], None, False)
+        if route == "feeds/open" and q.get("id"):
+            item = next((i for i in self.feeds.items if i["id"] == q["id"][0]), None)
+            if item and urlsplit(item["link"]).scheme in ("http", "https"):
+                self.feeds.read.add(item["id"])
+                self.feeds.save()
+                return self._redirect(request, html.escape(item["link"]))
+            return self._redirect(request, back)
+        if route == "feeds/later" and q.get("id"):
+            iid = q["id"][0]
+            if iid in self.feeds.later:
+                self.feeds.later.discard(iid)
+            else:
+                self.feeds.later.add(iid)
+            self.feeds.save()
+            return self._redirect(request, back)
+        if route == "feeds/readall":
+            self.feeds.read.update(i["id"] for i in self.feeds.scoped(q.get("scope", ["all"])[0]))
+            self.feeds.save()
+            return self._redirect(request, back)
+        if route == "feeds/folder" and q.get("id"):
+            self.feeds.set_folder(q["id"][0], q.get("name", [""])[0])
+            return self._redirect(request, back)
+        if route == "feeds/export":
+            folder = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DOWNLOAD) or store.DATA_DIR
+            path = os.path.join(folder, "Airlock feeds.opml")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(self.feeds.opml())
+            self.feed_message = f"Saved {path}"
+            return self._redirect(request, back)
+        if route == "feeds/import":
+            GLib.idle_add(lambda: (self.import_opml(), False)[-1])
+            return self._redirect(request, back)
         if route == "allow-http" and q.get("url"):
             target = q["url"][0]
             tab = self.window.current

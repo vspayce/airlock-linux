@@ -26,6 +26,16 @@ jobs:
           desktop-file-validate data/io.github.vspayce.Airlock.desktop
       - name: Logic checks
         run: python3 -m airlock.logic_tests
+      - name: Site info lookups (whois, DNS, hosting) against live services
+        continue-on-error: true
+        run: |
+          python3 - <<'PY'
+          from airlock import sitetools
+          w = sitetools.whois("www.wikipedia.org"); print("whois:", w["domain"], w["registrar"], w["created"])
+          r = sitetools.dns("wikipedia.org"); print("dns:", r[:5])
+          ip = next(v for t, v in r if t == "A"); print("host:", sitetools.ip_owner(ip))
+          assert w["domain"] == "wikipedia.org" and r
+          PY
       - name: Self-test (blocking in a real web view)
         run: xvfb-run -a dbus-run-session -- python3 -m airlock --selftest
       - name: Start the app for a few seconds

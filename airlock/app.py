@@ -204,6 +204,134 @@ class Tab:
         return False
 
 
+class SiteInfo(Adw.Dialog):
+    """Certificate, domain registration (whois), DNS records and hosting for the current site."""
+
+    def __init__(self, win, tab):
+        super().__init__(title="Site info", content_width=520, content_height=640)
+        self.win = win
+        uri = tab.view.get_uri() or ""
+        self.host = urls.host_of(uri)
+        page = Adw.PreferencesPage()
+        tv = Adw.ToolbarView(content=page)
+        tv.add_top_bar(Adw.HeaderBar())
+        self.set_child(tv)
+
+        # Connection and certificate (from the page actually loaded, not a second connection).
+        conn = Adw.PreferencesGroup(title="Connection", description=self.host)
+        ok, cert, errors = tab.view.get_tls_info() if uri.startswith("https://") else (False, None, 0)
+        if not uri.startswith("https://"):
+            conn.add(self._row("Encryption", "None: plain HTTP. Anyone on the network can read and change this page."))
+        elif cert is None:
+            conn.add(self._row("Certificate", "Not available"))
+        else:
+            conn.add(self._row("Encryption", "HTTPS, certificate verified" if not errors else "HTTPS, certificate problems"))
+            self._cert_rows(conn, cert)
+        page.add(conn)
+
+        self.domain = Adw.PreferencesGroup(title="Domain (whois)")
+        self._looking = self._row("Looking up…", "")
+        self.domain.add(self._looking)
+        page.add(self.domain)
+        self.records = Adw.PreferencesGroup(title="DNS records")
+        page.add(self.records)
+        self.hosts = Adw.PreferencesGroup(title="Hosted by")
+        page.add(self.hosts)
+        about = Adw.PreferencesGroup(description="Looked up only when you open this. Domain details come from the "
+                                                 "registry's RDAP service (the modern whois), DNS records from Cloudflare's "
+                                                 "encrypted DNS. No cookies, nothing about you is sent.")
+        page.add(about)
+        import threading
+        threading.Thread(target=self._lookup, daemon=True).start()
+
+    @staticmethod
+    def _row(title, value):
+        row = Adw.ActionRow(title=GLib.markup_escape_text(title), subtitle=GLib.markup_escape_text(value or ""))
+        row.set_subtitle_selectable(True)
+        row.add_css_class("property")
+        return row
+
+    def _cert_rows(self, group, cert):
+        import hashlib
+
+        def name(n):
+            return n or "—"
+        p = cert.props
+        group.add(self._row("Issued to", name(getattr(p, "subject_name", None))))
+        group.add(self._row("Issued by", name(getattr(p, "issuer_name", None))))
+        try:
+            nb, na = p.not_valid_before, p.not_valid_after
+            if na:
+                left = (na.to_unix() - GLib.DateTime.new_now_utc().to_unix()) // 86400
+                group.add(self._row("Valid", f"{nb.format('%b %-d, %Y') if nb else '?'} to {na.format('%b %-d, %Y')} ({left} days left)"))
+        except (AttributeError, TypeError):
+            pass
+        chain, c = [], cert.get_issuer()
+        while c is not None and len(chain) < 5:
+            chain.append(getattr(c.props, "subject_name", None) or "?")
+            c = c.get_issuer()
+        if chain:
+            group.add(self._row("Chain", " → ".join(chain)))
+        try:
+            der = bytes(p.certificate)
+            fp = hashlib.sha256(der).hexdigest().upper()
+            group.add(self._row("SHA-256 fingerprint", ":".join(fp[i:i + 2] for i in range(0, len(fp), 2))))
+        except (AttributeError, TypeError):
+            pass
+
+    def _lookup(self):
+        from . import sitetools
+        try:
+            w = sitetools.whois(self.host)
+        except Exception as e:  # noqa: BLE001
+            w = e
+        try:
+            recs = sitetools.dns(self.host)
+        except Exception as e:  # noqa: BLE001
+            recs = e
+        owners = []
+        if isinstance(recs, list):
+            for t, v in recs:
+                if t in ("A", "AAAA") and len(owners) < 4:
+                    o = sitetools.ip_owner(v)
+                    if o:
+                        owners.append(o)
+        GLib.idle_add(self._show, w, recs, owners)
+
+    def _show(self, w, recs, owners):
+        from . import sitetools
+        self.domain.remove(self._looking)
+        if isinstance(w, Exception):
+            self.domain.add(self._row("No registration record", str(w)))
+        else:
+            self.domain.add(self._row("Domain", w["domain"]))
+            if w["created"]:
+                if (GLib.DateTime.new_now_utc().to_unix() - int(w["created"].timestamp())) < 60 * 86400:
+                    warn = self._row("New domain", "This domain is less than two months old. New domains are common "
+                                                   "for scams and phishing.")
+                    warn.add_css_class("warning")
+                    self.domain.add(warn)
+                self.domain.add(self._row("Registered", w["created"].strftime("%b %-d, %Y") + " (" + sitetools.age(w["created"]) + ")"))
+            if w["expires"]:
+                self.domain.add(self._row("Expires", w["expires"].strftime("%b %-d, %Y")))
+            if w["registrar"]:
+                self.domain.add(self._row("Registrar", w["registrar"]))
+            if w["registrant"]:
+                self.domain.add(self._row("Registrant", w["registrant"]))
+            if w["nameservers"]:
+                self.domain.add(self._row("Name servers", ", ".join(w["nameservers"][:6])))
+        if isinstance(recs, Exception):
+            self.records.add(self._row("DNS lookup failed", str(recs)))
+        else:
+            for t, v in recs[:40]:
+                self.records.add(self._row(t, v))
+        for o in owners:
+            self.hosts.add(self._row(o["ip"], " · ".join(x for x in (o["owner"] or o["network"], o["country"], o["cidr"]) if x)))
+        if not owners:
+            self.hosts.add(self._row("Unknown", ""))
+        return False
+
+
 class Window(Adw.ApplicationWindow):
     def __init__(self, app):
         super().__init__(application=app, title="Airlock")
@@ -442,6 +570,10 @@ class Window(Adw.ApplicationWindow):
         note.add_css_class("caption")
         note.add_css_class("dim-label")
         box.append(note)
+        info = Gtk.Button(label="Site info: certificate, whois, DNS…")
+        info.add_css_class("pill")
+        info.connect("clicked", lambda *_: (self.shield_popover.popdown(), SiteInfo(self, tab).present(self)))
+        box.append(info)
         self.shield_popover.set_child(box)
 
     def on_reload(self, *_):
